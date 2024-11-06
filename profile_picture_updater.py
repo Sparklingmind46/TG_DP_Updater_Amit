@@ -1,82 +1,91 @@
 # profile_picture_updater.py
-from telethon import TelegramClient, events
-from PIL import Image, ImageDraw, ImageFont
-from datetime import datetime
-import os
 from flask import Flask
-from threading import Thread
+from telethon import TelegramClient
+import os
+from datetime import datetime
+from PIL import Image, ImageDraw, ImageFont
+import asyncio
 import time
+import requests
+from io import BytesIO
 
-# Initialize Flask app for health check
+# Initialize Flask app
 app = Flask(__name__)
 
-@app.route('/')
-def health_check():
-    return "OK", 200  # Koyeb expects this response to confirm health
-
-def run_flask():
-    app.run(host="0.0.0.0", port=8000)
-
-# Your Telegram bot credentials and other logic
+# Telethon API credentials
 api_id = os.getenv("API_ID")
 api_hash = os.getenv("API_HASH")
-phone_number = "YOUR_PHONE_NUMBER"  # Replace with your phone number
+phone_number = os.getenv("PHONE_NUMBER")
 
+# Initialize Telethon client
 client = TelegramClient("session_name", api_id, api_hash)
 
-@client.on(events.NewMessage)
-async def handler(event):
-    # Handle incoming messages or updates
-    pass
+# Health check route for Koyeb
+@app.route("/health", methods=["GET"])
+def health_check():
+    return "OK", 200
 
-def update_pfp():
-    # Get current time in 12-hour format with AM/PM and no seconds
-    now = datetime.now()
-    time_str = now.strftime("%I:%M %p")  # Format: Hour:Minute AM/PM (no seconds)
-    
-    # Create an image with a white background (512x512)
-    image = Image.new("RGB", (512, 512), (255, 255, 255))  # white background
-    draw = ImageDraw.Draw(image)
-    
-    # Try to load a custom font, if available, or fall back to default
+# Function to create profile picture with custom background from URL
+async def create_profile_picture():
+    # URL for custom background image (replace with your image URL)
+    background_url = os.getenv("BACKGROUND_URL", "https://example.com/background.jpg")
+
     try:
-        font_path = "fonts/font-PiroHackz.ttf"  # Specify the path to your .ttf font file
-        font = ImageFont.truetype(font_path, 40)
-    except IOError:
-        font = ImageFont.load_default()
+        # Download the background image from the web
+        response = requests.get(background_url)
+        response.raise_for_status()  # Will raise an exception for 4xx/5xx errors
+        background = Image.open(BytesIO(response.content))  # Open image from downloaded content
+        background = background.resize((640, 640))  # Resize to match profile picture dimensions
 
-    # Calculate the text size and position it in the center for the time
-    text_width, text_height = draw.textsize(time_str, font)
-    draw.text(((512 - text_width) / 2, (512 - text_height) / 3), time_str, fill="black", font=font)  # black font
+        # Prepare text (current time and "Amit")
+        current_time = datetime.now().strftime("%I:%M %p")  # Current time with AM/PM
+        draw = ImageDraw.Draw(background)
 
-    # Now draw "Amit" in tiny letters below the time
-    try:
-        small_font = ImageFont.truetype(font_path, 20)  # Smaller font for "Amit"
-    except IOError:
-        small_font = ImageFont.load_default()
+        # Specify font paths for time and "Amit" text
+        font = ImageFont.truetype("fonts/font-PiroHackz.ttf", 120)  # Adjust font path
+        small_font = ImageFont.truetype("fonts/font-PiroHackz.ttf", 40)  # Small font for "Amit"
 
-    # Calculate the text size for "Amit" and position it below the time
-    small_text_width, small_text_height = draw.textsize("Amit", small_font)
-    draw.text(((512 - small_text_width) / 2, (512 - text_height + small_text_height) / 1.5), "- Amit", fill="black", font=small_font)
+        # Draw the current time
+        text_width, text_height = draw.textsize(current_time, font=font)
+        draw.text(((640 - text_width) / 2, 200), current_time, fill="black", font=font)
 
-    # Save the image
-    image.save("profile_picture.png")
+        # Draw the "Amit" text
+        amit_width, amit_height = draw.textsize("Amit", font=small_font)
+        draw.text(((640 - amit_width) / 2, 350), "Amit", fill="black", font=small_font)
 
-    # Update the Telegram profile picture
-    client.loop.run_until_complete(client.update_profile(photo="profile_picture.png"))
+        # Save the final image
+        background.save("profile_picture.png")
+        print("Profile picture created and saved with custom background.")
+    
+    except requests.exceptions.RequestException as e:
+        print(f"Error downloading background image: {e}")
 
-    # Delete the image after updating
-    os.remove("profile_picture.png")
+# Function to update Telegram profile picture
+async def update_pfp():
+    while True:  # Run indefinitely with a sleep interval
+        await create_profile_picture()
+        try:
+            # Delete the previous profile picture first
+            await client.delete_profile_photo()  # This deletes the old profile picture
+            print("Old profile picture deleted successfully.")
 
-# Start the Flask server in a separate thread
-thread = Thread(target=run_flask)
-thread.start()
+            # Update the profile picture with the new one
+            await client.update_profile(photo="profile_picture.png")
+            print("Profile picture updated successfully.")
+        except Exception as e:
+            print(f"Error updating profile picture: {e}")
+        
+        # Sleep for the defined interval before the next update (in seconds)
+        sleep_interval = int(os.getenv("SLEEP_INTERVAL", 60))  # Default to 60 seconds
+        print(f"Sleeping for {sleep_interval} seconds before the next update...")
+        await asyncio.sleep(sleep_interval)  # Sleep for the specified interval
 
+# Start Telethon client and update profile picture
+@app.before_first_request
+def start_telethon():
+    asyncio.ensure_future(client.start())  # Start Telethon client
+    asyncio.ensure_future(update_pfp())    # Start the profile picture update loop
+
+# Run Flask app to handle health checks
 if __name__ == "__main__":
-    # Start the Telegram bot client
-    client.start()
-    
-    # Run the bot and continuously update the profile picture
-    while True:
-        update_pfp()
-        time.sleep(60)  # Update every 60 seconds (1 minute)
+    app.run(host="0.0.0.0", port=8000)
