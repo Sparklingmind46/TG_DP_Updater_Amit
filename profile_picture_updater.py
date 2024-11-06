@@ -12,7 +12,8 @@ api_hash = os.getenv('API_HASH')
 # Optional: Customize the image size and font
 image_size = (512, 512)
 font_size = 100
-font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'  # Change this if necessary
+font_path = 'fonts/font-PiroHackz.ttf'  # Adjust based on your repo structure
+font = ImageFont.truetype(font_path, font_size)
 
 # Directory to save the generated image
 image_file = 'current_time_pfp.png'
