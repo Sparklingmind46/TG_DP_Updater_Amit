@@ -53,7 +53,7 @@ async def update_profile_picture(client):
         ))
 
         # Wait for 1 hour before updating again
-        await asyncio.sleep(3600)
+        await asyncio.sleep(60)
 
 async def main():
     async with TelegramClient('session_name', api_id, api_hash) as client:
